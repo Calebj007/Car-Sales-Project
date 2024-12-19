@@ -1,0 +1,556 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <conio.h>
+#include <time.h>
+#include <stdbool.h>
+
+
+#define CAR_COUNT 3 //definitions of name details, wallet amount, and the initial value of cars to be stored and dynamically allocated memory
+#define MIN_AGE 18
+#define MIN_NAME 2
+#define MAX_NAME 20
+#define MAX_WALLET 250000.50//make sure that you minus the max_wallet that is allowed after every sale and record it in a file alongside recording all other sales data into the file to be read and appended later
+
+
+unsigned short carSales = 0;
+unsigned short customerSales = 0;
+unsigned short customerReview = 0;
+float totalCost = 0;
+
+
+// Struct definitions
+typedef struct { //make a structure that takes the account details of the user
+    char customerName[201];
+    int customerAge;
+    float accountWallet;
+} CustomerInformation;
+
+typedef struct { //struct that takes the details at CAR COUNT array size dynamically allocated memory in later function but currently stored as 3
+    char **carModelName;  //pointer to pointer of strings
+    int *stock;
+    float *price;
+    int *yearOfManufacture;
+    int numberCars;
+} CarList;
+
+typedef struct {
+    char customerNameValue[201];
+    int customerAgeValue;
+    float remainingBalanceValue;
+    float accountWalletValue;
+    char carModelNameValue[201];
+    int numberOfCarsValue;
+    float totalCostValue;
+    int quantityValue;
+    int customerReviewValue;
+    time_t purchaseTimeValue;
+} saleInfo;
+
+typedef struct {
+    saleInfo numberOfSales[100]; //hold up to 100 of the struct sales
+    int totalSales; //track our sale number
+} saleNumber;
+// Function prototypes
+
+CustomerInformation *customer;
+CarList *carList;
+saleNumber *SaleNumber;
+saleInfo *SaleInfo;
+
+//call the functions as global functions so that they can be used and stored inside of main for code readability
+void getCustomerDetails(CustomerInformation *customer);
+void introduceCarList(CarList *carList);
+void displayCars(const CarList *carList);
+void handlePurchase(const CarList *carList, CustomerInformation *customer, saleNumber *SaleNumber, unsigned short customerReview, struct tm *purchaseDate);
+void carSalesMenu();
+void introductionMessage();
+void displayBalanceDeposit();
+void menuOptionCheck();
+void quicksortCars();
+void customerFeedback();
+void recoverFileData(struct tm *purchaseDate, saleInfo *SaleInfo, saleNumber *SaleNumber, CustomerInformation *customer, CarList *carList, int quantity, float remainingBalance, float totalCost);
+void appendSaleToFile(CustomerInformation *customer, char *carModelName, float remainingBalance, int quantity, float totalCost, unsigned short customerReview, struct tm *purchaseDate);
+void readFile(struct tm *purchaseDate, saleInfo *SaleInfo, saleNumber *SaleNumber, CustomerInformation *customer, CarList *carList, float *remainingBalance, int *quantity);
+void resetFileData();
+void openFile();
+void closeFile();
+
+
+#define CSV_FILE "receipt.csv"
+
+#define FILE_OPENING 0
+#define FILE_CLOSING 1
+#define FILE_ERROR 2
+
+FILE* file;
+unsigned char fileActivity = FILE_CLOSING;
+
+// Main function
+int main() {
+    // Declare our variables
+    struct tm purchaseDate;
+    saleInfo SaleInfo[100];
+    saleNumber SaleNumber;
+    CustomerInformation customer;
+    CarList carList;
+    int quantity = 0;
+    float remainingBalance = 0;
+
+    introduceCarList(&carList); // Initialize car list
+    recoverFileData(&purchaseDate, SaleInfo, &SaleNumber, &customer, &carList, quantity, remainingBalance, totalCost);
+
+    introductionMessage();
+
+    char menuChoice;
+    do { //do while loop that uses all of the menu functions and switches the menu choice variable to match different outcomes
+        carSalesMenu(); // Display the menu
+        printf("Enter your choice: ");
+        scanf(" %c", &menuChoice);
+        getchar(); // Clear newline character
+
+        switch (menuChoice) {
+            case '1':
+                quicksortCars(&carList, 0, CAR_COUNT - 1);//use quicksort algorithm with a time complexity of O(log n), 0 is the starting array index and CAR COUNT - 1 is ( n - 1 = last array index)
+                displayCars(&carList);//pointer using & to carList struct
+                break;
+            case '2':
+                getCustomerDetails(&customer);
+                handlePurchase(&carList, &customer, &SaleNumber, customerReview, &purchaseDate);   //get customer details function and handle purchase algorithm
+                break;
+            case '3':
+                displayBalanceDeposit(&customer);
+                break;
+            case '4':
+                readFile(&purchaseDate, SaleInfo, &SaleNumber, &customer, &carList, &remainingBalance, &quantity);
+                break;
+
+            case '5':
+                resetFileData();
+                break;
+
+            default:
+                printf("Invalid choice. Please try again.\n");
+        }
+    } while (menuChoice != 'q');
+
+    for(int i = 0; i < carList.numberCars; i++) {
+        free(carList.carModelName[i]);//free each string as this is an array of pointers to strings
+        free(carList.carModelName); //free the array itself
+        free(carList.stock);
+        free(carList.price);
+        free(carList.yearOfManufacture);//free the allocated memory before the program exits to avoid memory leakages
+    }
+    printf("Thank you for using BMW Car Sales Portal!\n");
+    return 0;
+}
+
+//create the file in write mode and check if the file is not equal to null and therefore close the file
+FILE* createFile(char *fileName) {
+
+ file = fopen(fileName, "w");
+    if(file == NULL) {
+        printf("There was an error creating this file: %s\n", strerror(errno));
+        exit(1);
+    }else {
+        fclose(file);
+    }
+    return file; //return the file after creation
+}
+
+void appendSaleToFile(CustomerInformation *customer, char *carModelName, float remainingBalance, int quantity, float totalCost,  unsigned short customerReview, struct tm *purchaseDate) {
+    FILE *file = fopen(CSV_FILE, "a"); //open file in append mode so that we don't overwrite the file and can add customer purchases on the file until reset
+    if(file == NULL) {
+        printf("There was an error opening this file %s\n", strerror(errno)); //if file doesn't exist print error code
+        exit(1);
+    }
+    time_t t = time(NULL);
+    *purchaseDate = *localtime(&t); //create a struct to change time to local time
+
+        fprintf(file, "\t\tPURCHASE DATE:%d-%02d-%02d\n\t\t-CUSTOMER DETAILS:\n\t-Customer Name:%s\n\t-Customer Age:%d\n"
+                   "\t\tBalance Details:\n\t-Customer Remaining Balance:%.2f\n\t-Customer Wallet Balance:%.2f\n"
+                   "\t\tPurchase Info:\n\t-Car Model Purchased:%s\n\t-Quantity Purchased:%d\n"
+                   "\t-Total Cost:%.2f\n\t-Customer Review:%d\n", purchaseDate->tm_year + 1900,
+                   purchaseDate->tm_mon + 1, purchaseDate->tm_mday,
+                   customer->customerName,customer->customerAge, remainingBalance,
+                   customer->accountWallet,
+                   carModelName, quantity, totalCost, customerReview); //record the customer purchase data and the date
+
+        fclose(file);
+        printf("The data has been recorded successfully\n");
+    }
+
+
+void readFile(struct tm *purchaseDate, saleInfo *SaleInfo, saleNumber *SaleNumber, CustomerInformation *customer, CarList *carList, float *remainingBalance, int *quantity) {
+    char buffer[256];
+    file = fopen(CSV_FILE, "r"); //open in read
+    if (file == NULL) {
+        printf("Error opening file: %s\n", strerror(errno)); //if file not found print error number
+        return;
+    }
+
+    int lineCount = 0;
+    while (fgets(buffer, sizeof(buffer), file) != NULL) { //while our size of file buffer is not null check if the line count exceeds the max value
+        if (lineCount >= 100) {
+            printf("Error: Exceeded maximum sales records.\n");
+            break;
+        }
+
+        // this allows debugging of the buffer
+        if(customerSales > 0) {
+            printf("Receipt contents: '%s'\n", buffer);  //Display our current buffer
+        }else {
+            printf("\nMake a purchase before viewing sale data\n");
+            return;
+        }
+        int fileCount = sscanf(buffer,
+            "\tPURCHASE DATE:%d-%02d-%02d\n\t\t-CUSTOMER DETAILS:\n\t-Customer Name:%[^\n]\n\t-Customer Age:%d\n"
+            "\t\tBalance Details:\n\t-Customer Remaining Balance:%.2f\n\t-Customer Wallet Balance:%.2f\n"
+            "\t\tPurchase Info:\n\t-Car Model Purchased:%[^\n]\n\t-Quantity Purchased:%d\n"
+            "\t-Total Cost:%.2f\n\t-Customer Review:%d\n", //sscanf used to that we can get the value of our strings also as opposed to fscanf
+            &purchaseDate->tm_year, &purchaseDate->tm_mon, &purchaseDate->tm_mday,
+            SaleInfo[lineCount].customerNameValue, &SaleInfo[lineCount].customerAgeValue,
+            &SaleInfo[lineCount].remainingBalanceValue, &SaleInfo[lineCount].accountWalletValue,
+            SaleInfo[lineCount].carModelNameValue, &SaleInfo[lineCount].quantityValue,
+            &SaleInfo[lineCount].totalCostValue, &SaleInfo[lineCount].customerReviewValue); //pass in lineCount in our args
+
+        // Check if parsing was successful
+        if (fileCount == 11) {
+            printf("Error reading line number %d: There is an expected 11 fields, we collected: %d\n", lineCount + 1, fileCount);
+            continue; // continue past lines
+        }
+        SaleInfo[lineCount].customerNameValue[strcspn(SaleInfo[lineCount].customerNameValue, "\n\r")] = '\0';
+        SaleInfo[lineCount].carModelNameValue[strcspn(SaleInfo[lineCount].carModelNameValue, "\n\r")] = '\0';
+        purchaseDate->tm_year += 100; //add 100 from 1900 as this will give us the current year.
+        purchaseDate->tm_mon += 1;//likewise with the month
+        lineCount++; //increment lineCount
+    }
+
+
+    fclose(file);
+}
+
+
+void resetFileData() {
+    file = fopen(CSV_FILE, "w"); //overwrite the file in Write mode
+    if(file == NULL) {
+        printf("Error opening file\n");
+        fclose(file); //error code if file was not found
+    }
+    fprintf(file, "Customer Name, Customer Age, Remaining Balance, Customer Wallet, "
+    "Car Model Purchased, Quantity Purchased, Total Cost, Discount Value\n"); //placeholder args to reset file
+
+    fclose(file); //close the file stream
+    printf("The data has been reset successfully\n");
+}
+
+void openFile(char* fileName, char* mode) {//open file and if the created file is null close the file
+    file = fopen(fileName, mode);
+    if(file == NULL) {
+        if(createFile(fileName) == NULL) {
+            fileActivity = FILE_CLOSING;
+            printf("Opening the file: %s with error: %s", fileName, strerror(errno)); //produce an error and give out our error code
+        }else {
+            openFile(fileName, mode); //open the file
+        }
+    }else {
+        fileActivity = FILE_OPENING; //change the file activity to be opened
+    }
+}
+
+void recoverFileData(struct tm *purchaseDate, saleInfo *SaleInfo, saleNumber *SaleNumber, CustomerInformation *customer, CarList *carList, int quantity, float remainingBalance,  float totalCost) {
+    openFile(CSV_FILE, "r");
+
+    if(fileActivity == FILE_OPENING){
+    readFile(purchaseDate, SaleInfo, SaleNumber, customer, carList, &remainingBalance, &quantity );
+          }else if (fileActivity == FILE_CLOSING) {
+    printf("Reading the file has returned an error in %s file.", CSV_FILE);
+    fclose(file);
+     }
+    fclose(file);
+}
+void closeFile() {
+    if(fileActivity == FILE_CLOSING) {
+        fclose(file);
+        fileActivity = FILE_CLOSING;
+    }
+}
+
+
+// Function implementations
+void introductionMessage() {
+    printf("\nWelcome To The BMW Car Sales Portal\n");
+}
+
+    void carSalesMenu() {
+    printf("|--------------------------------------------------------------------------|\n");
+        printf("\t\t\tBMW CAR SALES MENU\n");
+    printf("|--------------------------------------------------------------------------|\n");
+        printf("1. View Car Stock\n");
+        printf("-----------------------------\n");
+        printf("2. Buy Car From Stock\n");
+        printf("-----------------------------\n");
+        printf("3. View Deposit & Account Balance\n");
+        printf("-----------------------------\n");
+        printf("4. View Sales Data\n");
+        printf("-----------------------------\n");
+        printf("5. Reset Sales Data\n");
+        printf("-----------------------------\n");
+        printf("Enter 'q' to quit.\n");
+    }
+    void displayBalanceDeposit(CustomerInformation *customer) {
+        if(customerSales == 0) {
+            printf("\tYou have not yet made a sale on this account\n\tPlease try make a purchase in the portal\n");
+            return;
+        }
+        float remainingBalance = MAX_WALLET -  customer->accountWallet;
+        printf("\n\t%s's BALANCE DEPOSIT: %.2f\n", customer->customerName, remainingBalance);
+        printf("----------------------------------------------\n");
+        printf("\n\t%s's CURRENT BALANCE: %.2f\n", customer->customerName, customer->accountWallet);
+
+    }
+
+    void introduceCarList(CarList *carList) {
+        carList->numberCars = CAR_COUNT;
+        carList->carModelName = malloc(carList->numberCars * sizeof(char *));//dynamically allocate memory to double the car model name array size x2
+        carList->stock = malloc(carList->numberCars * sizeof(int)); //dynamically allocate memory for the size of stock x2
+        carList->price = malloc(carList->numberCars * sizeof(float)); //dynamically allocate memory from a float to a void *
+        if(carList->price == NULL){ //check if memory is NULL
+            printf("Memory for price could not be allocated\n");
+            exit(1);
+        }
+        for(int i = 0; i < CAR_COUNT; i++) {
+            carList->price[i] = 0.0; //initialise car price at I index relative to CAR COUNT to 0
+        }
+        carList->yearOfManufacture = malloc(carList->numberCars * sizeof(int)); //dynamically allocate memory to the year of manufacture x2
+
+        if (!carList->carModelName || !carList->stock || !carList->price || !carList->yearOfManufacture) {
+            printf("Memory allocation failed.\n"); //check if memory allocation failed
+            exit(1);
+
+        }
+        carList -> carModelName[0] = strdup("BMW 3 Series Saloon"); //string dump the strings into the array slots at the respective indexes, heap memory allocated for string copy so we don't do it ourselves
+        carList -> carModelName[1] = strdup("BMW iX1"); //returns a pointer to a null-terminated byte string, which is a duplicate of the string pointed to by the input parameter, this allows us to gather pre-allocated memory from a memory heap
+        carList -> carModelName[2] = strdup("BMW M135 xDrive");
+
+        carList->price[0] = 40220; //store the prices of the cars at the initial array value
+        carList->price[1] = 46205;
+        carList->price[2] = 43000;
+
+        carList->stock[0] = 5; //store the stock of cars at the initial array value
+        carList->stock[1] = 8;
+        carList->stock[2] = 4;
+
+        carList->yearOfManufacture[0] = 1975; //store the year of manufacture of cars at the initial array value
+        carList->yearOfManufacture[1] = 2022;
+        carList->yearOfManufacture[2] = 2019;
+    }
+
+    void displayCars(const CarList *carList) {
+    printf("|--------------------------------------------------------------------------|\n");
+        printf("\t\t\tCars For Sale!:\n");
+    printf("|--------------------------------------------------------------------------|\n");
+        for (int i = 0; i < CAR_COUNT; i++) { //create a for loop that takes the Ith index position of the car details and stores it in the correct values
+
+            printf("[Model] %s | [Price] %.2f | [Stock] %d | [Manufacture Year] %d\n",
+                   carList->carModelName[i], carList->price[i], carList->stock[i], carList->yearOfManufacture[i]);
+            sleep(1);
+        }
+    }
+    bool checkString(const char *str,CustomerInformation *customer) {
+        while (*str) {
+            if(!isalpha(*str) && *str != ' ') { //isalpha checks if a character is in the alphabet or not
+                return false;
+            }
+            str++;
+        }
+        return true;
+    }
+    void getCustomerDetails(CustomerInformation *customer) {
+
+        printf("Enter your name: ");//gather customer details
+        fgets(customer->customerName, sizeof(customer->customerName), stdin); //allow the user to input their name using fgets and the sizeof customer name pointed to by customer
+        customer->customerName[strcspn(customer->customerName, "\n")] = '\0';
+
+        if(!checkString(customer->customerName, customer)) {
+            printf("\n\tYour name does not contain characters\n\t\tplease try again\n");
+            exit(1);
+        }
+        if(strlen(customer->customerName) < MIN_NAME) {
+            printf("\n\tYour name is too short please enter a new name\t\n");
+            exit(1);
+        }if(strlen(customer->customerName) > MAX_NAME) {
+            printf("\n\tYour name is too long please enter a new name\t\n");
+            exit(1);
+        }
+        printf("Enter your age: ");
+        scanf("%d", &customer->customerAge); //allow the user to enter their age
+        if(customer->customerAge < MIN_AGE) {
+            printf("You are not old enough to purchase one of our cars hosted\n", customer->customerAge);
+            exit(1);
+        }
+        getchar(); // Clear newline character
+
+        printf("Enter your wallet balance (max %.2f): ", MAX_WALLET); //allow the user to deposit money into their account wallet with a max value set
+        scanf("%f", &customer->accountWallet);
+        getchar(); // Clear newline character
+
+        if (customer->accountWallet > MAX_WALLET) { //bomb-proof the program stopping the user from adding however much money they want
+            printf("Wallet balance exceeds the limit. Setting balance to %.2f.\n", MAX_WALLET);
+            customer->accountWallet = MAX_WALLET; //set value to the max from whatever they typed over the limit allowed by the program
+        }if(customer->accountWallet == 0) {
+            printf("\nYou have specified an amount of 0 GBP in your E-Wallet\n");
+            exit(1);
+        }if(customer->accountWallet < 0) {
+            printf("\nPlease enter a positive integer\n");
+            exit(1);
+        }if(customer->accountWallet <= MAX_WALLET) {
+            float remainingBalance = MAX_WALLET -  customer->accountWallet;
+            printf("\n\tYour remaining deposit balance is: %.2f\n\t", remainingBalance);
+        }
+    }
+
+    void handlePurchase(const CarList *carList, CustomerInformation *customer, saleNumber *SaleNumber, unsigned short customerReview, struct tm *purchaseDate) {
+        int confirmationChoice;
+        char userPurchase[100];
+        int carFound = 0;
+
+        printf("Enter the car model you want to purchase: "); //handle the purchase using logic
+        fgets(userPurchase, sizeof(userPurchase), stdin); //gather the users input as standard input
+        userPurchase[strcspn(userPurchase, "\n")] = '\0'; //erase the newline character when they press enter typing in their car they want to purchase replacing it with the NULL char to state the end of the string
+
+        for (int i = 0; i < CAR_COUNT; i++) {
+            if (strcmp(userPurchase, carList->carModelName[i]) == 0) {
+                carFound = 1;
+                int quantity;
+                printf("You selected: %s\n", carList->carModelName[i]); //take the car they selected and proceed with the purchase calculations updating all values once completed
+                printf("Processing purchase");
+                for(int i = 0; i < 3; i++) {
+                    printf(".");
+                    fflush(stdout); //make sure dot is printed out immediately
+                    sleep(1);
+                }
+                printf("\nHow many of the %s model would you like to purchase %s?", carList->carModelName[i], customer->customerName);
+                scanf(" %d", &quantity);
+                while(getchar() != '\n');
+                if(quantity > carList->stock[i]) {
+                    printf("We do not have %d stock of the %s model for the quantity described please state another quantity.",quantity , carList->carModelName[i]);
+                    continue;
+                }if(quantity <= 0 ) {
+                    printf("Please enter a positive integer\n");
+                    continue;
+                }
+
+                float totalCost = carList->price[i] * (float)quantity;
+
+                if(carList->stock[i] > 0) {
+                    if(customer->accountWallet > totalCost) {
+                        int confirmationNumber = 3790;
+                        printf("\n\tDo you wish to purchase %d amount of %s Car Model?\n\tIf so enter the confirmation number %d\n\t",
+                        quantity, carList->carModelName[i], confirmationNumber);
+                        scanf(" %d", &confirmationChoice);
+                        if(confirmationChoice != confirmationNumber) {
+                            printf("Wrong confirmation\n\t\t ABORTING PURCHASE...\n");
+                            exit(1);
+                        }
+                        printf("\n\tYour total for this purchase is %.2f including insurance\n\t\tPlease enter the confirmation number again %d\n", totalCost, confirmationNumber);
+                        scanf(" %d", &confirmationChoice);
+                        if(confirmationChoice == 3790) {
+                            printf("Confirming Purchase");
+                            for(int i = 0; i < 3; i++) {
+                                printf(".");
+                                sleep(1);
+                            }if(confirmationChoice != confirmationNumber) {
+                                printf("Wrong confirmation\n\t\t ABORTING PURCHASE...\n");
+                                exit(1);
+                            }
+                            carList->stock[i] -= quantity;
+                            customer->accountWallet -= totalCost;
+                            printf("\n\tThank you %s for your purchase of %d car(s) under the %s Car Model\n\tYour receipt is now printed and send through the BMW portal along with access to customer feedback\t\n", customer->customerName, quantity, carList->carModelName[i]);
+                            printf("\n\tYour account Balance is now %.2f GBP", customer->accountWallet);
+
+                            printf("Thank you for making a purchase in our BMW Car Sales Portal\n");
+                            printf("----------------------------------------------------------------\n");
+                            printf("We really value your feedback! would you rate our services out of 0* to 5*?\n");
+                            printf("----------------------------------------------------------------\n");
+                            printf("Our reviews are an overall rating based off \napplication quality, service quality, car availability and price and more...\n");
+                            printf("\tPlease leave a review: ");
+                            scanf(" %d", &customerReview);
+                            if(customerReview <= 0) {
+                                printf("Anything negative or 0* is not accepted please try again\n");
+                            }else if(customerReview > 5) {
+                                printf("Anything above 5* is not accepted please try again\n");
+                            }
+                            printf("Thank you for your feedback of %d*\n", customerReview);
+                        }
+
+                        carSales ++;
+                        customerSales ++;
+                        SaleNumber->totalSales++;
+                        float remainingBalance = MAX_WALLET - customer->accountWallet;
+                        time_t t = time(NULL);
+                        *purchaseDate = *localtime(&t);
+
+                        appendSaleToFile(customer,carList->carModelName[i],
+                            remainingBalance, quantity, totalCost, customerReview, purchaseDate);
+
+                        }else if(customer->accountWallet < totalCost) {
+                        printf("\n\tInsufficient Funds for %d quantity of %s Car Model\n\tPlease return and deposit money into your E-Wallet\t\n", quantity, carList->carModelName[i]);
+                        break;
+                        }
+                        }else if(carList->stock[i] == 0) {
+                        printf("The Car Model %s has %d stock available\n", carList->carModelName[i], carList->stock[i]);
+                         break;
+                        }
+                        }if (file == NULL) {
+                        printf("Data could not be appended\n");
+                        exit (1);
+                    }
+                }
+            }
+
+    void quicksortCars(CarList *carList, int low, int high) {
+        if(low < high) {
+            int pivot = carList->yearOfManufacture[(low + high) / 2]; //middle element is pivot
+            int i = low; //set i as before first index
+            int j = high; // set j as last index
+            if(i < j) {
+                while (carList->yearOfManufacture[i] > pivot) i++; //moving elements > piv to right
+                while (carList->yearOfManufacture[j] < pivot) j--; //moving elements < piv to left
+                if(i <= j) { //if i less than or equal to j
+                    int tempYear = carList->yearOfManufacture[i]; //swap year of the car manufacturing
+                    carList->yearOfManufacture[i] = carList->yearOfManufacture[j];
+                    carList->yearOfManufacture[j] = tempYear;
+
+                    char tempModel[50];
+                    strcpy(tempModel, carList->carModelName[i]); //swap car model name
+                    strcpy(carList->carModelName[i], carList->carModelName[j]);
+                    strcpy(carList->carModelName[j], tempModel);
+
+                    int tempPrice = carList->price[i]; //swap the price
+                    carList->price[i] = carList->price[j];
+                    carList->price[j] = tempPrice;
+
+                    int tempStock = carList->stock[i]; //swap the stock
+                    carList->stock[i] = carList->stock[j];
+                    carList->stock[j] = tempStock;
+
+                    i++; //increment i by 1 only if i < j
+                    j--; //increment j by 1 only if i < j ensure that this is not a ++ to avoid error code -1073741819 out of boundary violation of array scaling
+                }
+            }
+            //recursive sort two partitions using quicksort algorithm until both partitions are sorted to give final sorted array
+            if(low < j) quicksortCars(carList, low, j);
+            if(i < high) quicksortCars(carList, i, high);
+        }
+    }
+
+
+    void menuOptionCheck(menuChoice) {
+        if(menuChoice != 1 || menuChoice != 2 || menuChoice || 3 || menuChoice != 4 || menuChoice != 5) {
+            printf("Invalid Choice\n");
+            exit(1);
+        }
+    }
